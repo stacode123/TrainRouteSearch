@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Train Route Finder</title>
+    <style>
+        body {
+            background-color: gray;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            font-family: Arial, sans-serif;
+        }
+        form {
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        .result-box {
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div>
+       <form method="post">
+          <h1>Find the Best Train Route</h1>
+              <label for="start">Starting Station:</label>
+                 <select id="start" name="start" required>
+                  {% for station in stations %}
+                     <option value="{{ station }}">{{ station }}</option>
+                  {% endfor %}
+             </select><br><br>
+
+       <label for="goal">Destination Station:</label>
+          <select id="goal" name="goal" required>
+        {% for station in stations %}
+            <option value="{{ station }}">{{ station }}</option>
+        {% endfor %}
+    </select><br><br>
+
+    <label for="departure_hour">Departure Hour (24-hour format):</label>
+    <input type="number" id="departure_hour" name="departure_hour" min="0" max="23" required><br><br>
+
+    <label for="departure_minute">Departure Minute:</label>
+    <input type="number" id="departure_minute" name="departure_minute" min="0" max="59" required><br><br>
+
+    <label for="buffer_time">Minimum Transfer Time (minutes):</label>
+    <input type="number" id="buffer_time" name="buffer_time" value="5" min="0" required><br><br>
+
+    <button type="submit">Find Route</button>
+</form>
+
+ {% if route_options %}
+    <div class="result-box">
+        <h2>Available Routes:</h2>
+        {% for option in route_options %}
+            <h3>Route Total Time: {{ option.total_time }} minutes</h3>
+            <ul>
+                {% for leg in option.legs %}
+                    <li>{{ leg.train }}: {{ leg.departure_station }} {{ leg.departure_time }}
+                        --> {{ leg.arrival_station }} {{ leg.arrival_time }}
+                    </li>
+                {% endfor %}
+            </ul>
+        {% endfor %}
+    </div>
+{% elif result %}
+    <p>{{ result }}</p>
+{% endif %}
+
+
+    </div>
+</body>
+</html>
