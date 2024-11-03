@@ -226,9 +226,13 @@ def dijkstra_find_routes(start, goal, departure_time, buffer_time, max_options=3
                 # Parse times for departure and arrival as time objects
                 dep_time = datetime.strptime(dep_time_str, "%H:%M").time()
                 arr_time = datetime.strptime(next_arr_time_str, "%H:%M").time()
-
+                r = "0"
                 # Check if the current path’s arrival time plus buffer time allows for this departure
-                if time_difference_in_minutes(current_time, dep_time) >= buffer_delta:
+                try:
+                    r = path[-1][1]
+                except:
+                    r="0"
+                if time_difference_in_minutes(current_time, dep_time) >= buffer_delta or train_number == r:
                     # Calculate travel time to this new station
                     travel_time = time_difference_in_minutes(dep_time, arr_time)
                     waiting_time = time_difference_in_minutes(current_time, dep_time)
@@ -245,13 +249,39 @@ def dijkstra_find_routes(start, goal, departure_time, buffer_time, max_options=3
     formatted_routes = []
     for total_time, route in found_routes:
         formatted_route = []
-        for train_name, train_number, dep_station, arr_station, dep_time, arr_time in route:
+        if route:
+            current_train = route[0][1]
+            start_station = route[0][2]
+            start_time = route[0][4]
+            end_station, end_time = route[0][3], route[0][5]
+
+            for leg in route[1:]:
+                train_name, train_number, dep_station, arr_station, dep_time, arr_time = leg
+                if train_number == current_train:
+                    # Extend the segment on the same train
+                    end_station = arr_station
+                    end_time = arr_time
+                else:
+                    # Add the completed segment and start a new one
+                    formatted_route.append({
+                        "train": f"{route[0][0]} ({current_train})",
+                        "departure_station": start_station,
+                        "departure_time": start_time,
+                        "arrival_station": end_station,
+                        "arrival_time": end_time
+                    })
+                    current_train = train_number
+                    start_station = dep_station
+                    start_time = dep_time
+                    end_station, end_time = arr_station, arr_time
+
+            # Append the last segment
             formatted_route.append({
-                "train": f"{train_name} ({train_number})",
-                "departure_station": dep_station,
-                "departure_time": dep_time,
-                "arrival_station": arr_station,
-                "arrival_time": arr_time
+                "train": f"{route[-1][0]} ({current_train})",
+                "departure_station": start_station,
+                "departure_time": start_time,
+                "arrival_station": end_station,
+                "arrival_time": end_time
             })
         formatted_routes.append((total_time, formatted_route))
 
