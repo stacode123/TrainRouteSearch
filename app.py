@@ -1,11 +1,17 @@
 #Import Libraries
 import warnings
+from asyncio import Timeout
+
 from datetime import time
+import datetime
+import signal
 import pandas as pd
-import heapq
-from datetime import datetime, timedelta
+
 from flask import Flask, render_template, request
 from datetime import datetime, timedelta
+
+from pandas.core.common import maybe_iterable_to_list
+
 warnings.simplefilter(action='ignore', category=FutureWarning)
 app = Flask(__name__)
 def ReadExcel(sheet):
@@ -197,7 +203,6 @@ def addtime(time1, hourtoadd, minutestoadd):
     return time1.time()
 
 def heuristic(current_station, goal_station):
-    # Simple heuristic: number of stations between current and goal
     return abs(stations.index(current_station) - stations.index(goal_station))
 
 def a_star_find_routes(start, goal, departure_time, buffer_time):
@@ -206,7 +211,8 @@ def a_star_find_routes(start, goal, departure_time, buffer_time):
     best_times = {start: 0}
     found_routes = []
 
-    # Add multiple initial states to the queue
+
+
     for (train_name, train_number), schedule in train_data.items():
         for i in range(len(schedule) - 1):
             from_station, dep_time_str, arr_time_str = schedule[i]
@@ -215,8 +221,12 @@ def a_star_find_routes(start, goal, departure_time, buffer_time):
                 if time_difference_in_minutes(departure_time, dep_time) >= 0:
                     heapq.heappush(queue, (0, start, dep_time, [], 0))
 
+    StartTime = datetime.now() + timedelta(seconds=10)
     while queue and len(found_routes) < 10:
         total_travel_time, current_station, current_time, path, g_cost = heapq.heappop(queue)
+        if datetime.now() > StartTime:
+            break
+
 
         if current_station == goal:
             found_routes.append((total_travel_time, path))
@@ -241,19 +251,19 @@ def a_star_find_routes(start, goal, departure_time, buffer_time):
                     new_g_cost = g_cost + travel_time + waiting_time
                     f_cost = new_g_cost + heuristic(to_station, goal)
 
-                    if to_station not in best_times or new_total_travel_time:
+                    if to_station not in best_times or new_total_travel_time <= best_times[to_station]:
                         new_path = path + [
                             (train_name, train_number, from_station, to_station, dep_time_str, next_arr_time_str)]
                         heapq.heappush(queue, (f_cost, to_station, arr_time, new_path, new_g_cost))
 
-    # Sort found routes by closeness to the selected departure time and remove duplicates
-    found_routes = sorted(found_routes, key=lambda x: abs(time_difference_in_minutes(departure_time, datetime.strptime(x[1][0][4], "%H:%M").time())))
+    found_routes = sorted(found_routes, key=lambda x: abs(
+        time_difference_in_minutes(departure_time, datetime.strptime(x[1][0][4], "%H:%M").time())))
     unique_routes = []
-    seen_paths = set()
+    seen_trains = set()
     for total_time, route in found_routes:
-        route_tuple = tuple(route)
-        if route_tuple not in seen_paths:
-            seen_paths.add(route_tuple)
+        train_route = tuple((leg[1], leg[2], leg[3]) for leg in route)
+        if train_route not in seen_trains:
+            seen_trains.add(train_route)
             unique_routes.append((total_time, route))
 
     formatted_routes = []
