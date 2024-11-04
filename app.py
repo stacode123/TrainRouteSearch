@@ -1,11 +1,9 @@
 #Import Libraries
 import warnings
 from datetime import time
-from typing import Dict, Any, List, Tuple
-import heapq
 import pandas as pd
-
-
+import heapq
+from datetime import datetime, timedelta
 from flask import Flask, render_template, request
 from datetime import datetime, timedelta
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -191,63 +189,75 @@ def time_difference_in_minutes(start_time, end_time):
     return int((end_dt - start_dt).total_seconds() / 60)
 
 
-def dijkstra_find_routes(start, goal, departure_time, buffer_time, max_options=3):
-    # Convert buffer time to integer minutes
+
+
+def addtime(time1, hourtoadd, minutestoadd):
+    time1 = datetime.combine(datetime.today(), time1)
+    time1 = time1 + timedelta(hours=hourtoadd, minutes=minutestoadd)
+    return time1.time()
+
+def heuristic(current_station, goal_station):
+    # Simple heuristic: number of stations between current and goal
+    return abs(stations.index(current_station) - stations.index(goal_station))
+
+def a_star_find_routes(start, goal, departure_time, buffer_time):
     buffer_delta = buffer_time
-
-    # Priority queue: stores (total_travel_time, current_station, current_time, path_so_far)
-    queue = [(0, start, departure_time, [])]
-
-    # Best known travel times to each station
+    queue = []
     best_times = {start: 0}
-
-    # Store multiple valid paths to the destination
     found_routes = []
 
-    while queue and len(found_routes) < max_options:
-        # Get the route with the shortest travel time so far
-        total_travel_time, current_station, current_time, path = heapq.heappop(queue)
+    # Add multiple initial states to the queue
+    for (train_name, train_number), schedule in train_data.items():
+        for i in range(len(schedule) - 1):
+            from_station, dep_time_str, arr_time_str = schedule[i]
+            if from_station == start:
+                dep_time = datetime.strptime(dep_time_str, "%H:%M").time()
+                if time_difference_in_minutes(departure_time, dep_time) >= 0:
+                    heapq.heappush(queue, (0, start, dep_time, [], 0))
 
-        # If we reached the goal, add the route to found_routes
+    while queue and len(found_routes) < 10:
+        total_travel_time, current_station, current_time, path, g_cost = heapq.heappop(queue)
+
         if current_station == goal:
             found_routes.append((total_travel_time, path))
             continue
 
-        # Explore all possible train options from the current station
         for (train_name, train_number), schedule in train_data.items():
             for i in range(len(schedule) - 1):
                 from_station, dep_time_str, arr_time_str = schedule[i]
                 to_station, next_dep_time_str, next_arr_time_str = schedule[i + 1]
 
-                # Only consider trains that leave from the current station
                 if from_station != current_station:
                     continue
 
-                # Parse times for departure and arrival as time objects
                 dep_time = datetime.strptime(dep_time_str, "%H:%M").time()
                 arr_time = datetime.strptime(next_arr_time_str, "%H:%M").time()
-                r = "0"
-                # Check if the current path’s arrival time plus buffer time allows for this departure
-                try:
-                    r = path[-1][1]
-                except:
-                    r="0"
+                r = path[-1][1] if path else "0"
+
                 if time_difference_in_minutes(current_time, dep_time) >= buffer_delta or train_number == r:
-                    # Calculate travel time to this new station
                     travel_time = time_difference_in_minutes(dep_time, arr_time)
                     waiting_time = time_difference_in_minutes(current_time, dep_time)
                     new_total_travel_time = total_travel_time + travel_time + waiting_time
+                    new_g_cost = g_cost + travel_time + waiting_time
+                    f_cost = new_g_cost + heuristic(to_station, goal)
 
-                    # If we found a faster way to reach this station, add to queue
-                    if to_station not in best_times or new_total_travel_time < best_times[to_station]:
-                        best_times[to_station] = new_total_travel_time
+                    if to_station not in best_times or new_total_travel_time:
                         new_path = path + [
                             (train_name, train_number, from_station, to_station, dep_time_str, next_arr_time_str)]
-                        heapq.heappush(queue, (new_total_travel_time, to_station, arr_time, new_path))
+                        heapq.heappush(queue, (f_cost, to_station, arr_time, new_path, new_g_cost))
 
-    # Format the found routes as needed
-    formatted_routes = []
+    # Sort found routes by closeness to the selected departure time and remove duplicates
+    found_routes = sorted(found_routes, key=lambda x: abs(time_difference_in_minutes(departure_time, datetime.strptime(x[1][0][4], "%H:%M").time())))
+    unique_routes = []
+    seen_paths = set()
     for total_time, route in found_routes:
+        route_tuple = tuple(route)
+        if route_tuple not in seen_paths:
+            seen_paths.add(route_tuple)
+            unique_routes.append((total_time, route))
+
+    formatted_routes = []
+    for total_time, route in unique_routes:
         formatted_route = []
         if route:
             current_train = route[0][1]
@@ -258,11 +268,9 @@ def dijkstra_find_routes(start, goal, departure_time, buffer_time, max_options=3
             for leg in route[1:]:
                 train_name, train_number, dep_station, arr_station, dep_time, arr_time = leg
                 if train_number == current_train:
-                    # Extend the segment on the same train
                     end_station = arr_station
                     end_time = arr_time
                 else:
-                    # Add the completed segment and start a new one
                     formatted_route.append({
                         "train": f"{route[0][0]} ({current_train})",
                         "departure_station": start_station,
@@ -275,7 +283,6 @@ def dijkstra_find_routes(start, goal, departure_time, buffer_time, max_options=3
                     start_time = dep_time
                     end_station, end_time = arr_station, arr_time
 
-            # Append the last segment
             formatted_route.append({
                 "train": f"{route[-1][0]} ({current_train})",
                 "departure_station": start_station,
@@ -286,7 +293,6 @@ def dijkstra_find_routes(start, goal, departure_time, buffer_time, max_options=3
         formatted_routes.append((total_time, formatted_route))
 
     return formatted_routes
-
 @app.route('/', methods=['GET', 'POST'])
 def index():
     result = None
@@ -302,7 +308,8 @@ def index():
         departure_time = time(departure_hour, departure_minute)  # Convert to datetime.time
 
         # Get multiple route options
-        found_routes = dijkstra_find_routes(start, goal, departure_time, buffer_time, max_options=3)
+        found_routes = a_star_find_routes(start, goal, departure_time, buffer_time)
+        print(found_routes)
         if found_routes:
             for total_time, route in found_routes:
                 route_options.append({
