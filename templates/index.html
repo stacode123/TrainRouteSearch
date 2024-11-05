@@ -98,9 +98,9 @@
             <h2>Available Routes:</h2>
             {% for option in route_options %}
                    <details>
-                       <summary>{{ option.legs[0].departure_time }} --> {{ option.legs[-1].arrival_time }}</summary>
+                       <summary>{{ option[0].departure_time }} --> {{ option[-1].arrival_time }}</summary>
                    <ul>
-                      {% for leg in option.legs %}
+                      {% for leg in option %}
                           <li>{{ leg.train }}: {{ leg.departure_station }} {{ leg.departure_time }}
                                 --> {{ leg.arrival_station }} {{ leg.arrival_time }}
                             </li>

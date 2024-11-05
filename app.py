@@ -1,6 +1,7 @@
 #Import Libraries
 import warnings
 from asyncio import Timeout
+from collections import defaultdict
 
 from datetime import time
 import datetime
@@ -11,7 +12,7 @@ from flask import Flask, render_template, request
 from datetime import datetime, timedelta
 
 from pandas.core.common import maybe_iterable_to_list
-
+startdate = datetime.today()
 warnings.simplefilter(action='ignore', category=FutureWarning)
 app = Flask(__name__)
 def ReadExcel(sheet):
@@ -178,131 +179,184 @@ for (train_name, train_number), schedule in trainssort.items():
     train_data[(train_name, train_number)] = []
     for station, dep_time in schedule:
         arr_time = trainsls[(train_name, train_number)][trainsls[(train_name, train_number)].index(station) + 1] if station in trainsls[(train_name, train_number)] else datetime.time(datetime.combine(datetime.today(),dep_time)-timedelta(minutes=1))
-        train_data[(train_name, train_number)].append((station, dep_time.strftime('%H:%M'), arr_time.strftime('%H:%M') if isinstance(arr_time, time) else dep_time.strftime('%H:%M')))
-    train_data[(train_name, train_number)].append((trainslss[(train_name, train_number)][1],trainslss[(train_name, train_number)][0].strftime('%H:%M'),trainslss[(train_name, train_number)][0].strftime('%H:%M')))
+        train_data[(train_name, train_number)].append((station, datetime.combine(datetime.today(),arr_time), datetime.combine(datetime.today(),dep_time) ))
+    train_data[(train_name, train_number)].append((trainslss[(train_name, train_number)][1],datetime.combine(datetime.today(),trainslss[(train_name, train_number)][0]),datetime.combine(datetime.today(),trainslss[(train_name, train_number)][0])))
 print(train_data)
 
 import heapq
 from datetime import datetime, timedelta
 
-
-def time_difference_in_minutes(start_time, end_time):
-    """Calculate the difference in minutes between two time objects, handling next-day wrap-around."""
-    start_dt = datetime.combine(datetime.today(), start_time)
-    end_dt = datetime.combine(datetime.today(), end_time)
-    if end_dt < start_dt:  # If end time is past midnight, adjust for next day
-        end_dt += timedelta(days=1)
-    return int((end_dt - start_dt).total_seconds() / 60)
+from collections import defaultdict
+from datetime import datetime, timedelta
 
 
+class Connection:
+    def __init__(self, departure_station, arrival_station, departure_time, arrival_time, train_info):
+        self.departure_station = departure_station
+        self.arrival_station = arrival_station
+        self.departure_time = departure_time
+        self.arrival_time = arrival_time
+        self.train_info = train_info  # Tuple containing (traindata, trainNumber)
 
 
-def addtime(time1, hourtoadd, minutestoadd):
-    time1 = datetime.combine(datetime.today(), time1)
-    time1 = time1 + timedelta(hours=hourtoadd, minutes=minutestoadd)
-    return time1.time()
-
-def heuristic(current_station, goal_station):
-    return abs(stations.index(current_station) - stations.index(goal_station))
-
-def a_star_find_routes(start, goal, departure_time, buffer_time):
-    buffer_delta = buffer_time
-    queue = []
-    best_times = {start: 0}
-    found_routes = []
+class Connection:
+    def __init__(self, departure_station, arrival_station, departure_time, arrival_time, train_info):
+        self.departure_station = departure_station
+        self.arrival_station = arrival_station
+        self.departure_time = departure_time
+        self.arrival_time = arrival_time
+        self.train_info = train_info  # Tuple containing (traindata, trainNumber)
 
 
+def connection_scan_algorithm_multiple_paths(connections, start_station, start_time, end_station, max_options=10,
+                                             time_threshold=timedelta(minutes=10)):
+    # Initialize earliest arrival times with lists of arrival options
+    far_future = datetime.max
+    earliest_arrival = defaultdict(lambda: [])
+    earliest_arrival[start_station].append((start_time, None))  # Start with start_time and no connection
 
-    for (train_name, train_number), schedule in train_data.items():
-        for i in range(len(schedule) - 1):
-            from_station, dep_time_str, arr_time_str = schedule[i]
-            if from_station == start:
-                dep_time = datetime.strptime(dep_time_str, "%H:%M").time()
-                if time_difference_in_minutes(departure_time, dep_time) >= 0:
-                    heapq.heappush(queue, (0, start, dep_time, [], 0))
+    # Backtracking dictionary to reconstruct multiple paths
+    backtrack = defaultdict(lambda: [])
 
-    StartTime = datetime.now() + timedelta(seconds=10)
-    while queue and len(found_routes) < 10:
-        total_travel_time, current_station, current_time, path, g_cost = heapq.heappop(queue)
-        if datetime.now() > StartTime:
-            break
+    # Process each connection in chronological order
+    for connection in connections:
+        # For each arrival option at the departure station
+        for (arr_time, _) in earliest_arrival[connection.departure_station]:
+            # If this connection departs after the earliest arrival time, it’s usable
+            if arr_time <= connection.departure_time:
+                new_arrival_time = connection.arrival_time
+
+                # Check if we already have similar options at the arrival station
+                is_similar = any(
+                    abs((new_arrival_time - existing_time).total_seconds()) < time_threshold.total_seconds()
+                    for (existing_time, _) in earliest_arrival[connection.arrival_station])
+
+                # Only add if it’s a sufficiently different arrival time
+                if not is_similar:
+                    # Add the new arrival option
+                    earliest_arrival[connection.arrival_station].append((new_arrival_time, connection))
+                    backtrack[connection.arrival_station].append((connection, arr_time))
+
+                    # Maintain only top `max_options` sorted by earliest arrival
+                    earliest_arrival[connection.arrival_station].sort()
+                    if len(earliest_arrival[connection.arrival_station]) > max_options:
+                        earliest_arrival[connection.arrival_station] = earliest_arrival[connection.arrival_station][
+                                                                       :max_options]
+
+    # Reconstruct multiple paths, ensuring paths end at end_station
+    paths = []
+    for (final_arrival_time, _) in earliest_arrival[end_station]:
+        path = []
+        current_station = end_station
+        current_time = final_arrival_time
+
+        while current_station != start_station:
+            # Try to find the connection leading to the current station and time
+            try:
+                connection, arr_time = next((conn, arr_time) for conn, arr_time in backtrack[current_station] if
+                                            conn.arrival_time == current_time)
+            except StopIteration:
+                # Break out of the loop if no matching connection is found
+                path = None
+                break
+
+            path.append(connection)
+            current_station = connection.departure_station
+            current_time = arr_time
+
+            # Stop if we've reached the start station to prevent further backtracking
+            if current_station == start_station:
+                break
+
+        # Only add valid paths that end at the destination
+        if path and path[0].arrival_station == end_station:
+            # Reverse path to go from start to end
+            paths.append(list(reversed(path)))
 
 
-        if current_station == goal:
-            found_routes.append((total_travel_time, path))
-            continue
+    formated_routes = []
+    for idx, path in enumerate(paths, 1):
+        formatted_path = []
+        for conn in path:
+            if len(formatted_path) > 0 and conn.train_info[1] == formatted_path[-1]["train number"]:
+                formatted_path[-1]["arrival_station"] = conn.arrival_station
+                formatted_path[-1]["arrival_time"] = conn.arrival_time.strftime("%H:%M")
+            else:
+                formatted_path.append({
+                    "train": conn.train_info[0],
+                    "train number": conn.train_info[1],
+                    "departure_station": conn.departure_station,
+                    "departure_time": conn.departure_time.strftime("%H:%M"),
+                    "arrival_station": conn.arrival_station,
+                    "arrival_time": conn.arrival_time.strftime("%H:%M")
+                })
+        formated_routes.append(formatted_path)
+    print(formated_routes)
+    return formated_routes
 
-        for (train_name, train_number), schedule in train_data.items():
-            for i in range(len(schedule) - 1):
-                from_station, dep_time_str, arr_time_str = schedule[i]
-                to_station, next_dep_time_str, next_arr_time_str = schedule[i + 1]
 
-                if from_station != current_station:
-                    continue
+def convert_dict_to_connections(train_dict):
+    connections = []
 
-                dep_time = datetime.strptime(dep_time_str, "%H:%M").time()
-                arr_time = datetime.strptime(next_arr_time_str, "%H:%M").time()
-                r = path[-1][1] if path else "0"
+    for (trainData, trainNumber), stations in train_dict.items():
+        for i in range(len(stations) - 1):
+            # Extract data for consecutive stations
+            departure_station, _, departure_time = stations[i]
+            arrival_station, arrival_time, _ = stations[i + 1]
 
-                if time_difference_in_minutes(current_time, dep_time) >= buffer_delta or train_number == r:
-                    travel_time = time_difference_in_minutes(dep_time, arr_time)
-                    waiting_time = time_difference_in_minutes(current_time, dep_time)
-                    new_total_travel_time = total_travel_time + travel_time + waiting_time
-                    new_g_cost = g_cost + travel_time + waiting_time
-                    f_cost = new_g_cost + heuristic(to_station, goal)
+            # Create a Connection instance
+            connection = Connection(
+                departure_station=departure_station,
+                arrival_station=arrival_station,
+                departure_time=departure_time,
+                arrival_time=arrival_time,
+                train_info=(trainData, trainNumber)
+            )
 
-                    if to_station not in best_times or new_total_travel_time <= best_times[to_station]:
-                        new_path = path + [
-                            (train_name, train_number, from_station, to_station, dep_time_str, next_arr_time_str)]
-                        heapq.heappush(queue, (f_cost, to_station, arr_time, new_path, new_g_cost))
+            # Add to connections list
+            connections.append(connection)
 
-    found_routes = sorted(found_routes, key=lambda x: abs(
-        time_difference_in_minutes(departure_time, datetime.strptime(x[1][0][4], "%H:%M").time())))
-    unique_routes = []
-    seen_trains = set()
-    for total_time, route in found_routes:
-        train_route = tuple((leg[1], leg[2], leg[3]) for leg in route)
-        if train_route not in seen_trains:
-            seen_trains.add(train_route)
-            unique_routes.append((total_time, route))
+    return connections
+connections = convert_dict_to_connections(train_data)
 
-    formatted_routes = []
-    for total_time, route in unique_routes:
-        formatted_route = []
-        if route:
-            current_train = route[0][1]
-            start_station = route[0][2]
-            start_time = route[0][4]
-            end_station, end_time = route[0][3], route[0][5]
+# formatted_routes = []
+# for total_time, route in unique_routes:
+#     formatted_route = []
+#     if route:
+#         current_train = route[0][1]
+#         start_station = route[0][2]
+#         start_time = route[0][4]
+#         end_station, end_time = route[0][3], route[0][5]
+#
+#         for leg in route[1:]:
+#             train_name, train_number, dep_station, arr_station, dep_time, arr_time = leg
+#             if train_number == current_train:
+#                 end_station = arr_station
+#                 end_time = arr_time
+#             else:
+#                 formatted_route.append({
+#                     "train": f"{route[0][0]} ({current_train})",
+#                     "departure_station": start_station,
+#                     "departure_time": start_time,
+#                     "arrival_station": end_station,
+#                     "arrival_time": end_time
+#                 })
+#                 current_train = train_number
+#                 start_station = dep_station
+#                 start_time = dep_time
+#                 end_station, end_time = arr_station, arr_time
+#
+#         formatted_route.append({
+#             "train": f"{route[-1][0]} ({current_train})",
+#             "departure_station": start_station,
+#             "departure_time": start_time,
+#             "arrival_station": end_station,
+#             "arrival_time": end_time
+#         })
+#     formatted_routes.append((total_time, formatted_route))
+#
+# return formatted_routes
 
-            for leg in route[1:]:
-                train_name, train_number, dep_station, arr_station, dep_time, arr_time = leg
-                if train_number == current_train:
-                    end_station = arr_station
-                    end_time = arr_time
-                else:
-                    formatted_route.append({
-                        "train": f"{route[0][0]} ({current_train})",
-                        "departure_station": start_station,
-                        "departure_time": start_time,
-                        "arrival_station": end_station,
-                        "arrival_time": end_time
-                    })
-                    current_train = train_number
-                    start_station = dep_station
-                    start_time = dep_time
-                    end_station, end_time = arr_station, arr_time
-
-            formatted_route.append({
-                "train": f"{route[-1][0]} ({current_train})",
-                "departure_station": start_station,
-                "departure_time": start_time,
-                "arrival_station": end_station,
-                "arrival_time": end_time
-            })
-        formatted_routes.append((total_time, formatted_route))
-
-    return formatted_routes
 @app.route('/', methods=['GET', 'POST'])
 def index():
     result = None
@@ -318,14 +372,14 @@ def index():
         departure_time = time(departure_hour, departure_minute)  # Convert to datetime.time
 
         # Get multiple route options
-        found_routes = a_star_find_routes(start, goal, departure_time, buffer_time)
-        print(found_routes)
-        if found_routes:
-            for total_time, route in found_routes:
-                route_options.append({
-                    "total_time": total_time,
-                    "legs": route
-                })
+        found_routes = connection_scan_algorithm_multiple_paths(connections, start, datetime.combine(startdate,departure_time),  goal)
+        newtime = timedelta(minutes=30)
+        while found_routes == []:
+            newtime = newtime + timedelta(minutes=30)
+            found_routes = connection_scan_algorithm_multiple_paths(connections, start, datetime.combine(startdate,departure_time)+newtime,  goal)
+            if newtime > timedelta(hours=24):
+                break
+        route_options = found_routes
         result = "No route found."
 
     return render_template('index.html', stations=stations, route_options=route_options, result=result)
